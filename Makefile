@@ -1,7 +1,7 @@
 CC=g++
 CFLAGS=-O3 -ffast-math
-LDFLAGS=-static# -lm
-PROGRAM=TMalign TMscore MMalign se pdb2xyz xyz_sfetch pdb2fasta pdb2ss NWalign
+LDFLAGS=-lm
+PROGRAM=TMalign TMscore MMalign se pdb2xyz xyz_sfetch pdb2fasta pdb2ss NWalign wTMalign
 
 all: ${PROGRAM}
 
@@ -12,6 +12,9 @@ TMscore: TMscore.cpp TMscore.h param_set.h basic_fun.h Kabsch.h NW.h TMalign.h p
 	${CC} ${CFLAGS} $@.cpp -o $@ ${LDFLAGS}
 
 MMalign: MMalign.cpp MMalign.h param_set.h basic_fun.h Kabsch.h NW.h TMalign.h pstream.h
+	${CC} ${CFLAGS} $@.cpp -o $@ ${LDFLAGS}
+
+wTMalign: wTMalign.cpp wTMalign.h param_set.h basic_fun.h Kabsch.h NW.h pstream.h
 	${CC} ${CFLAGS} $@.cpp -o $@ ${LDFLAGS}
 
 se: se.cpp se.h param_set.h basic_fun.h Kabsch.h NW.h TMalign.h pstream.h

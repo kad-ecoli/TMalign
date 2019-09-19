@@ -1,6 +1,6 @@
 /* command line argument parsing and document of TMalign main program */
 
-#include "TMalign.h"
+#include "wTMalign.h"
 
 using namespace std;
 
@@ -9,7 +9,7 @@ void print_version()
     cout << 
 "\n"
 " **********************************************************************\n"
-" * TM-align (Version 20190818): protein and RNA structure alignment   *\n"
+" * wTM-align (Version 20190818): protein and RNA structure alignment  *\n"
 " * References: Y Zhang, J Skolnick. Nucl Acids Res 33, 2302-9 (2005)  *\n"
 " *             S Gong, C Zhang, Y Zhang. Bioinformatics, bz282 (2019) *\n"
 " * Please email comments and suggestions to yangzhanglab@umich.edu    *\n"
@@ -162,6 +162,7 @@ int main(int argc, char *argv[])
     /**********************/
     string xname       = "";
     string yname       = "";
+    string wname       = ""; // file name for weighted residue list
     string fname_super = ""; // file name for superposed structure
     string fname_lign  = ""; // file name for user alignment
     string fname_matrix= ""; // file name for output matrix
@@ -178,6 +179,7 @@ int main(int argc, char *argv[])
     bool d_opt = false; // flag for -d, user specified d0
 
     double TMcut     =-1;
+    double w_opt     =10.0;  // default weight value of 10.0
     int    infmt1_opt=-1;    // PDB or PDBx/mmCIF format for chain_1
     int    infmt2_opt=-1;    // PDB or PDBx/mmCIF format for chain_2
     int    ter_opt   =3;     // TER, END, or different chainID
@@ -194,6 +196,7 @@ int main(int argc, char *argv[])
     string dir1_opt  ="";    // set -dir1 to empty
     string dir2_opt  ="";    // set -dir2 to empty
     int    byresi_opt=0;     // set -byresi to 0
+    vector<int> w_resi;
     vector<string> chain1_list; // only when -dir1 is set
     vector<string> chain2_list; // only when -dir2 is set
 
@@ -252,6 +255,10 @@ int main(int argc, char *argv[])
         {
             fast_opt = true;
         }
+	else if (!strcmp(argv[i], "-w") && i < (argc-1))
+	{
+	    w_opt=atof(argv[i + 1]); i++;
+	}
         else if ( !strcmp(argv[i],"-infmt1") && i < (argc-1) )
         {
             infmt1_opt=atoi(argv[i + 1]); i++;
@@ -318,11 +325,13 @@ int main(int argc, char *argv[])
         }
         else if (xname.size() == 0) xname=argv[i];
         else if (yname.size() == 0) yname=argv[i];
+	else if (wname.size() == 0) wname=argv[i];
         else PrintErrorAndQuit(string("ERROR! Undefined option ")+argv[i]);
     }
 
-    if(xname.size()==0 || (yname.size()==0 && dir_opt.size()==0) || 
-                          (yname.size()    && dir_opt.size()))
+    if(xname.size()==0 || wname.size()==0 || 
+      (yname.size()==0 && dir_opt.size()==0) || 
+      (yname.size()    && dir_opt.size()))
     {
         if (h_opt) print_help(h_opt);
         if (v_opt)
@@ -336,6 +345,8 @@ int main(int argc, char *argv[])
             PrintErrorAndQuit("Please provide structure B");
         else if (yname.size() && dir_opt.size())
             PrintErrorAndQuit("Please provide only one file name if -dir is set");
+	else if (wname.size()==0)
+	    PrintErrorAndQuit("Please provide the weighted residue file");
     }
 
     if (suffix_opt.size() && dir_opt.size()+dir1_opt.size()+dir2_opt.size()==0)
@@ -382,6 +393,23 @@ int main(int argc, char *argv[])
     if (cp_opt && i_opt)
         PrintErrorAndQuit("-cp cannot be used with -i or -I");
 
+    /* parse weighted residue file */
+    ifstream wf;
+    wf.open(wname.c_str());
+    if (!wf.is_open())
+        PrintErrorAndQuit("Weight file was not found!");
+    string w_line;
+    while(getline(wf,w_line)){
+        char *ptr;
+        long resi;
+        resi=strtol(w_line.c_str(),&ptr,10);
+        if (*ptr!=0)
+	    PrintErrorAndQuit("Weight file contains non-integer value");
+	w_resi.push_back((int)resi);
+    }
+    if (w_resi.size()==0)
+        cout<<"Warning: weighted residue file is empty"<<endl;
+    
     /* read initial alignment file from 'align.txt' */
     if (i_opt) read_user_alignment(sequence, fname_lign, i_opt);
 
@@ -424,7 +452,7 @@ int main(int argc, char *argv[])
                                // --> superpose xa onto ya
     vector<string> resi_vec1;  // residue index for chain1
     vector<string> resi_vec2;  // residue index for chain2
-
+    
     /* loop over file names */
     for (i=0;i<chain1_list.size();i++)
     {
@@ -499,13 +527,37 @@ int main(int argc, char *argv[])
                     seqy = new char[ylen + 1];
                     secy = new char[ylen + 1];
                     ylen = read_PDB(PDB_lines2[chain_j], ya, seqy,
-                        resi_vec2, byresi_opt);
+		    resi_vec2, max(1,byresi_opt));
                     if (mol_vec2[chain_j]>0)
                          make_sec(seqy, ya, ylen, secy, atom_opt);
                     else make_sec(ya, ylen, secy);
 
                     if (byresi_opt) extract_aln_from_resi(sequence,
                         seqx,seqy,resi_vec1,resi_vec2,byresi_opt);
+		    
+		    /* construct weight vector for this pair of TMalign */
+		    vector<int> resi_ivec2;
+		    for (vector<string>::iterator it=resi_vec2.begin();
+			it!=resi_vec2.end(); ++it){
+		        resi_ivec2.push_back(atoi(it->c_str()));
+		    }
+
+		    int winds[w_resi.size()];
+		    for (size_t ind=0; ind < w_resi.size(); ++ind){
+		        vector<int>::iterator indx=find(resi_ivec2.begin(),
+		            resi_ivec2.end(),w_resi[ind]);
+		        if (indx==resi_ivec2.end())
+			    PrintErrorAndQuit("Residues to be weighted not found");
+  		        winds[ind]=distance(resi_ivec2.begin(),indx);
+		    }
+		    
+		    double w[ylen];
+		    for (i=0;i<ylen;i++){
+		        w[i]=1.0;
+		    }
+		    for (i=0;i<w_resi.size();i++){
+		        w[winds[i]]=w_opt;
+		    }
 
                     /* declare variable specific to this pair of TMalign */
                     double t0[3], u0[3][3];
